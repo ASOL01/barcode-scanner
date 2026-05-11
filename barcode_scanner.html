@@ -22,10 +22,10 @@
     background: #000; overflow: hidden;
     display: flex; justify-content: center; align-items: center;
   }
-  
+
   #reader { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   #reader video { width: 100% !important; max-height: 100% !important; object-fit: cover; }
-  
+
   #qr-shaded-region { display: none !important; }
 
   #snapshot {
@@ -35,19 +35,17 @@
 
   #aim-frame {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 85%;
-    max-width: 450px;
-    height: 80px;
+    width: 85%; max-width: 450px; height: 80px;
     border: 3px solid #00e5ff; border-radius: 8px;
     pointer-events: none; z-index: 10;
-    box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(0, 229, 255, 0.3);
+    box-shadow: 0 0 0 4000px rgba(0,0,0,0.5), inset 0 0 10px rgba(0,229,255,0.3);
     transition: all 0.3s;
   }
-  #aim-frame.success { 
-    border-color: #4caf50; background: rgba(76, 175, 80, 0.2); 
-    box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.7), inset 0 0 15px rgba(76, 175, 80, 0.5);
+  #aim-frame.success {
+    border-color: #4caf50; background: rgba(76,175,80,0.2);
+    box-shadow: 0 0 0 4000px rgba(0,0,0,0.7), inset 0 0 15px rgba(76,175,80,0.5);
   }
-  
+
   #scanline {
     position: absolute; top: 0; left: 0; right: 0; height: 2px; background: #00e5ff;
     animation: sc 1.5s linear infinite; box-shadow: 0 0 8px #00e5ff;
@@ -60,12 +58,10 @@
     display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
   }
 
-  #status-msg {
-    font-size: 15px; font-weight: bold; color: #00e5ff; margin-bottom: 20px; text-align: center;
-  }
+  #status-msg { font-size: 15px; font-weight: bold; color: #00e5ff; margin-bottom: 20px; text-align: center; }
 
   #result-ui { width: 100%; display: none; }
-  
+
   #einput {
     width: 100%; font-size: 24px; font-family: monospace; font-weight: bold; letter-spacing: 2px;
     padding: 15px; border-radius: 10px; border: 2px solid #4caf50; background: #222; color: #fff;
@@ -76,23 +72,16 @@
   .btn { flex: 1; padding: 16px; border-radius: 10px; font-size: 16px; font-weight: bold; border: none; cursor: pointer; }
   .b-ok { background: #185FA5; color: #fff; }
   .b-retry { background: #333; color: #ccc; }
-  
+
   #close-btn-wrap { margin-top: auto; padding-top: 20px; width: 100%; }
   .b-close { width: 100%; padding: 14px; border-radius: 10px; background: #1a1a1a; color: #888; border: 1px solid #333; font-weight: bold; cursor: pointer; }
-
-  /* コールバックなし警告 */
-  #no-callback-warn {
-    display: none; width: 100%; padding: 10px 14px; border-radius: 8px;
-    background: #2a2000; border: 1px solid #F0A500; color: #F0A500;
-    font-size: 13px; text-align: center; margin-bottom: 16px;
-  }
 </style>
 </head>
 <body>
 
 <div id="app-container">
   <div id="header">
-    <h1>📷 バーコードスキャン16</h1>
+    <h1>📷 バーコードスキャン</h1>
   </div>
 
   <div id="camera-section">
@@ -105,10 +94,9 @@
 
   <div id="action-section">
     <div id="status-msg">カメラを起動中...</div>
-    
+
     <div id="result-ui">
       <input type="tel" id="einput" maxlength="15" inputmode="numeric">
-      <div id="no-callback-warn">⚠ 戻り先が設定されていません。IMEIをメモして手動入力してください。</div>
       <div class="btns">
         <button class="btn b-ok" onclick="doConfirm()">✅ 確定</button>
         <button class="btn b-retry" onclick="doRetry()">🔄 再スキャン</button>
@@ -125,18 +113,12 @@
 let scanner = null;
 let isScanning = true;
 
-// ── URLパラメータからコールバックURLを取得 ──
-// 呼び出し例: barcode_scanner.html?callback=https://script.google.com/...
-const CALLBACK_URL = new URLSearchParams(location.search).get('callback') || '';
-
 async function startScanner() {
-  if (scanner) {
-    try { await scanner.clear(); } catch(e) {}
-  }
+  if (scanner) { try { await scanner.clear(); } catch(e) {} }
   scanner = new Html5Qrcode("reader");
 
   const config = {
-    fps: 20, 
+    fps: 20,
     qrbox: (viewfinderWidth, viewfinderHeight) => {
       const boxWidth = Math.min(viewfinderWidth * 0.85, 450);
       return { width: Math.floor(boxWidth), height: 80 };
@@ -152,8 +134,6 @@ async function startScanner() {
       (decodedText) => {
         if (!isScanning) return;
         const cleanCode = decodedText.replace(/\D/g, '');
-        
-        // 厳格な15桁チェック
         if (cleanCode.length === 15) {
           isScanning = false;
           onSuccess(cleanCode);
@@ -188,11 +168,6 @@ function onSuccess(digits) {
   document.getElementById('result-ui').style.display = 'block';
   document.getElementById('einput').value = digits;
 
-  // コールバックURLがない場合は警告を表示
-  if (!CALLBACK_URL) {
-    document.getElementById('no-callback-warn').style.display = 'block';
-  }
-
   if (navigator.vibrate) navigator.vibrate(100);
 }
 
@@ -203,7 +178,6 @@ function doRetry() {
   document.getElementById('status-msg').style.display = 'block';
   document.getElementById('status-msg').style.color = '#00e5ff';
   document.getElementById('einput').value = '';
-  document.getElementById('no-callback-warn').style.display = 'none';
 
   if (scanner) scanner.resume();
   setTimeout(() => { isScanning = true; }, 300);
@@ -212,47 +186,27 @@ function doRetry() {
 function doConfirm() {
   const val = document.getElementById('einput').value;
   const cleanVal = val.replace(/\D/g, '');
-  
+
   if (cleanVal.length !== 15) {
     alert("15桁の数字に修正してください。");
     return;
   }
 
-  if (CALLBACK_URL) {
-    // ── URLパラメータでフォームページに戻る ──
-    // コールバックURL に ?imei=XXXXXXXXXXXXXXX を付けてリダイレクト
-    const sep = CALLBACK_URL.includes('?') ? '&' : '?';
-    const returnUrl = CALLBACK_URL + sep + 'imei=' + encodeURIComponent(cleanVal);
-
-    // カメラを停止してから遷移
-    if (scanner) {
-      scanner.stop()
-        .catch(() => {})
-        .finally(() => { location.href = returnUrl; });
-    } else {
-      location.href = returnUrl;
-    }
+  // ポップアップ元のフォームにIMEIを返して閉じる
+  if (window.opener) {
+    window.opener.postMessage({ type: 'BARCODE_RESULT', barcode: cleanVal }, '*');
+    window.close();
   } else {
-    // コールバックURLがない場合（単体テスト等）はアラートで表示
-    alert('IMEI: ' + cleanVal + '\n\n（戻り先URLが未設定のため画面遷移できません）');
+    // 単独で開いた場合はアラートで表示
+    alert('IMEI: ' + cleanVal);
   }
 }
 
 function doClose() {
-  if (CALLBACK_URL) {
-    // 戻り先があれば何も渡さずフォームに戻る
-    if (scanner) {
-      scanner.stop().catch(() => {}).finally(() => { location.href = CALLBACK_URL; });
-    } else {
-      location.href = CALLBACK_URL;
-    }
+  if (scanner && scanner.isScanning) {
+    scanner.stop().then(() => window.close()).catch(() => window.close());
   } else {
-    // 戻り先がなければ閉じる
-    if (scanner && scanner.isScanning) {
-      scanner.stop().then(() => window.close()).catch(() => window.close());
-    } else {
-      window.close();
-    }
+    window.close();
   }
 }
 
