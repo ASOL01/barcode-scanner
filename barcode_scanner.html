@@ -24,7 +24,7 @@ body{font-family:-apple-system,sans-serif;background:#000;color:#fff;height:100v
 #reader { width: 100%; height: 100%; }
 #reader video { object-fit: cover !important; width: 100% !important; height: 100% !important; }
 
-/* 念のためライブラリのオーバーレイUIを強制非表示 */
+/* ライブラリの白枠オーバーレイUIを強制非表示 */
 #qr-shaded-region { display: none !important; }
 
 /* --- 自作の青枠 --- */
@@ -62,16 +62,23 @@ body.is-success #msg { color: #4caf50; }
 /* フッター */
 #footer { background: #111; padding: 15px 15px 30px; flex-shrink:0; z-index: 20; border-top: 1px solid #333; }
 
-/* 結果入力エリア（初期は非表示） */
+/* 結果入力エリア（初期は非表示、is-successで表示） */
 #result-box { display: none; margin-bottom: 10px; }
+body.is-success #result-box { display: block; }
+
 #rnum { font-size: 26px; font-weight: 700; letter-spacing: 2px; text-align: center; color: #00e5ff; margin-bottom: 10px; font-family: monospace; }
 #einput { width: 100%; font-size: 20px; padding: 12px; border-radius: 10px; border: 1px solid #444; background: #222; color: #fff; text-align: center; }
 
 /* ボタンエリア */
 .btns { display: flex; gap: 10px; margin-top: 15px; }
 .btn { flex: 1; padding: 15px; border-radius: 12px; font-size: 15px; font-weight: 700; border: none; cursor: pointer; }
-.b-ok { background: #185FA5; color: #fff; display: none; } /* 初期非表示 */
-.b-retry { background: #333; color: #ccc; display: none; } /* 初期非表示 */
+
+/* 確定・再試行ボタンは初期非表示、is-successで表示 */
+#bok, #bretry { display: none; }
+body.is-success #bok, body.is-success #bretry { display: block; }
+
+.b-ok { background: #185FA5; color: #fff; }
+.b-retry { background: #333; color: #ccc; }
 .b-close { background: #1a1a1a; color: #777; border: 1px solid #333; }
 </style>
 </head>
@@ -79,7 +86,7 @@ body.is-success #msg { color: #4caf50; }
 
 <div id="app-container">
   <div id="header">
-    <h1>📷 バーコードスキャン7</h1>
+    <h1>📷 バーコードスキャン8</h1>
     <p>青枠内にバーコードを水平に合わせてください</p>
   </div>
 
@@ -106,19 +113,17 @@ body.is-success #msg { color: #4caf50; }
 
 <script>
 let html5QrCode = null;
+let isScanEnabled = true; // プログラム内部でのスキャン許可フラグ
 const msg = document.getElementById('msg');
 
 async function startScanner() {
-  if (html5QrCode) {
-    try { await html5QrCode.clear(); } catch(e) {}
-  }
   html5QrCode = new Html5Qrcode("reader");
 
-  // スキャン設定 (qrboxを削除してフルスクリーン解析にすることで白枠を消し、iPadの精度を最大化)
+  // スキャン設定 (白枠を出さないフルスクリーン解析)
   const config = {
     fps: 15,
     experimentalFeatures: {
-        useBarCodeDetectorIfSupported: true // iOSの爆速解析機能を利用
+        useBarCodeDetectorIfSupported: true 
     },
     formatsToSupport: [ 
       Html5QrcodeSupportedFormats.CODE_128,
@@ -131,73 +136,84 @@ async function startScanner() {
       { facingMode: "environment" },
       config,
       (decodedText) => {
-        const cleanCode = decodedText.replace(/\D/g, '').slice(0, 15);
-        if (cleanCode.length >= 10) onSuccess(cleanCode);
+        // スキャン許可フラグがOFFの時は無視する
+        if (!isScanEnabled) return;
+
+        // 数字のみを抽出
+        const cleanCode = decodedText.replace(/\D/g, '');
+        
+        // ★重要: 「ピッタリ15桁」の場合のみ成功とみなす
+        if (cleanCode.length === 15) {
+          isScanEnabled = false; // 二重読み込み防止
+          onSuccess(cleanCode);
+        }
       },
-      () => {} 
+      () => {} // スキャン中のエラーログは無視
     );
-    msg.textContent = "枠に合わせてください";
+    msg.textContent = "15桁のバーコードを枠に合わせてください";
   } catch (err) {
     msg.textContent = "カメラの起動に失敗しました";
   }
 }
 
 function onSuccess(digits) {
-  // すでにスキャン済みの場合は無視
-  if (document.body.classList.contains('is-success')) return;
-
-  // 【iOSフリーズ対策】先に画面(DOM)を描画させてからカメラを止める
+  // UIの更新 (CSSクラスを付与するだけでボタン等が一瞬で表示される)
   document.body.classList.add('is-success');
   
-  // UIの更新
   document.getElementById('rnum').textContent = digits;
   document.getElementById('einput').value = digits;
-  document.getElementById('result-box').style.display = 'block';
-  document.getElementById('bok').style.display = 'block';
-  document.getElementById('bretry').style.display = 'block';
   msg.textContent = "✓ 読み取り成功";
 
   // バイブレーション
   if (navigator.vibrate) navigator.vibrate(100);
 
-  // 画面の更新（リフロー）を強制
-  document.body.offsetHeight;
-
-  // 少し遅らせてからカメラを止めることで、ボタンが確実に表示されるようにする
-  setTimeout(() => {
-    if (html5QrCode && html5QrCode.isScanning) {
-      html5QrCode.pause(true);
-    }
-  }, 50);
+  // 【iOSフリーズ対策】
+  // カメラの通信機能(MediaStream)自体は止めず、HTMLの映像表示だけを一時停止してフリーズを回避
+  const videoEl = document.querySelector('#reader video');
+  if (videoEl) {
+    videoEl.pause();
+  }
 }
 
 function doRestart() {
   // UIを初期状態に戻す
   document.body.classList.remove('is-success');
-  document.getElementById('result-box').style.display = 'none';
-  document.getElementById('bok').style.display = 'none';
-  document.getElementById('bretry').style.display = 'none';
-  msg.textContent = "枠に合わせてください";
+  msg.textContent = "15桁のバーコードを枠に合わせてください";
   
-  // スキャン再開
-  if (html5QrCode) html5QrCode.resume();
+  // 映像表示を再開
+  const videoEl = document.querySelector('#reader video');
+  if (videoEl) {
+    videoEl.play();
+  }
+
+  // 0.5秒後にスキャン許可フラグをONにする（連続誤タップ防止）
+  setTimeout(() => {
+    isScanEnabled = true;
+  }, 500);
 }
 
 function doConfirm() {
   const val = document.getElementById('einput').value;
-  if (window.opener) window.opener.postMessage({ type: 'BARCODE_RESULT', barcode: val }, '*');
-  
-  if (html5QrCode) {
+  // 確定処理 (15桁に満たない場合の手動入力バリデーション)
+  const cleanVal = val.replace(/\D/g, '');
+  if (cleanVal.length !== 15) {
+    alert("15桁の数字に修正してください。");
+    return;
+  }
+
+  if (window.opener) window.opener.postMessage({ type: 'BARCODE_RESULT', barcode: cleanVal }, '*');
+  doClose();
+}
+
+function doClose() {
+  if (html5QrCode && html5QrCode.isScanning) {
     html5QrCode.stop().then(() => window.close()).catch(() => window.close());
   } else {
     window.close();
   }
 }
 
-window.onbeforeunload = () => {
-  if (html5QrCode) html5QrCode.stop();
-};
-
+// ページ読み込み時に実行
 window.onload = startScanner;
 </script>
 </body>
