@@ -40,7 +40,7 @@ h1{font-size:18px;font-weight:700;margin-bottom:4px;}
 </head>
 <body>
 <h1>📷 バーコードスキャン</h1>
-<p class="sub">カメラで撮影するか、画像を選択してください</p>
+<p class="sub">バーコードを横向きに、画面いっぱいに撮影してください</p>
 
 <div class="capture-btns">
   <label class="cap-btn">
@@ -93,47 +93,68 @@ function setStatus(msg, type) {
   statusEl.innerHTML = type === 'info' ? '<div class="spinner"></div>' + msg : msg;
 }
 
-// 複数スケールで試行してバーコードを検出する
-function tryDecode(canvas) {
-  const hints = new Map();
-  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-    ZXing.BarcodeFormat.EAN_13,
-    ZXing.BarcodeFormat.CODE_128,
-    ZXing.BarcodeFormat.ITF,
-    ZXing.BarcodeFormat.CODE_39,
-    ZXing.BarcodeFormat.EAN_8,
-  ]);
-  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+// CODE-128に特化したヒント
+const hints = new Map();
+hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128]);
+hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
 
+function decodeFromCanvas(canvas) {
+  const w = canvas.width;
+  const h = canvas.height;
   const ctx = canvas.getContext('2d');
 
-  // 複数の解像度で試す
-  const scales = [1.0, 0.75, 0.5, 1.5];
-  for (const scale of scales) {
-    const w = Math.round(canvas.width * scale);
-    const h = Math.round(canvas.height * scale);
-    const tmpCanvas = document.createElement('canvas');
-    tmpCanvas.width = w;
-    tmpCanvas.height = h;
-    const tmpCtx = tmpCanvas.getContext('2d');
-    tmpCtx.drawImage(canvas, 0, 0, w, h);
-    const imageData = tmpCtx.getImageData(0, 0, w, h);
+  // 試すスケール一覧（CODE-128は横長なので横幅を保ちつつ縦を絞ると効果的）
+  const attempts = [
+    // [scaleW, scaleH, rotate]
+    [1.0, 1.0, 0],
+    [1.0, 0.5, 0],   // 縦半分（バーコード部分だけ切り抜き効果）
+    [0.5, 1.0, 0],
+    [1.5, 1.5, 0],
+    [2.0, 2.0, 0],
+    [1.0, 1.0, 90],  // 90度回転
+    [1.0, 1.0, 270], // 270度回転
+  ];
 
+  for (const [sw, sh, deg] of attempts) {
     try {
-      const src = new ZXing.RGBLuminanceSource(imageData.data, w, h);
-      const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src));
-      const reader = new ZXing.MultiFormatReader();
-      const result = reader.decode(bmp, hints);
-      return result.getText();
-    } catch(e) {}
+      let srcW = Math.round(w * sw);
+      let srcH = Math.round(h * sh);
+      const tmp = document.createElement('canvas');
 
-    // GlobalHistogramBinarizerでも試す
-    try {
-      const src2 = new ZXing.RGBLuminanceSource(imageData.data, w, h);
-      const bmp2 = new ZXing.BinaryBitmap(new ZXing.GlobalHistogramBinarizer(src2));
-      const reader2 = new ZXing.MultiFormatReader();
-      const result2 = reader2.decode(bmp2, hints);
-      return result2.getText();
+      if (deg === 90 || deg === 270) {
+        tmp.width = srcH;
+        tmp.height = srcW;
+        const tc = tmp.getContext('2d');
+        tc.translate(tmp.width / 2, tmp.height / 2);
+        tc.rotate(deg * Math.PI / 180);
+        tc.drawImage(canvas, -srcW / 2, -srcH / 2, srcW, srcH);
+      } else {
+        // 縦半分の場合は中央帯だけ切り出す
+        tmp.width = srcW;
+        tmp.height = srcH;
+        const tc = tmp.getContext('2d');
+        const sy = sh < 1.0 ? Math.round(h * (1 - sh) / 2) : 0;
+        tc.drawImage(canvas, 0, sy, w, Math.round(h * sh), 0, 0, srcW, srcH);
+      }
+
+      const imageData = tmp.getContext('2d').getImageData(0, 0, tmp.width, tmp.height);
+
+      // HybridBinarizer
+      try {
+        const src = new ZXing.RGBLuminanceSource(imageData.data, tmp.width, tmp.height);
+        const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src));
+        const result = new ZXing.MultiFormatReader().decode(bmp, hints);
+        if (result) return result.getText();
+      } catch(e) {}
+
+      // GlobalHistogramBinarizer
+      try {
+        const src2 = new ZXing.RGBLuminanceSource(imageData.data, tmp.width, tmp.height);
+        const bmp2 = new ZXing.BinaryBitmap(new ZXing.GlobalHistogramBinarizer(src2));
+        const result2 = new ZXing.MultiFormatReader().decode(bmp2, hints);
+        if (result2) return result2.getText();
+      } catch(e) {}
+
     } catch(e) {}
   }
   return null;
@@ -147,25 +168,21 @@ function handleFile(file) {
   resultWrap.style.display = 'none';
   confirmBtn.style.display = 'none';
   retryBtn.style.display = 'none';
-  setStatus('バーコードを読み取り中...', 'info');
+  setStatus('読み取り中...', 'info');
 
   const img = new Image();
   img.onload = () => {
     const canvas = document.createElement('canvas');
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
+    canvas.getContext('2d').drawImage(img, 0, 0);
 
-    const text = tryDecode(canvas);
+    const text = decodeFromCanvas(canvas);
     if (text) {
       const digits = text.replace(/\D/g, '').slice(0, 15);
-      if (digits.length >= 10) {
-        onSuccess(digits);
-        return;
-      }
+      if (digits.length >= 10) { onSuccess(digits); return; }
     }
-    setStatus('検出できませんでした。バーコードを画面いっぱいに撮影して再試行してください。', 'error');
+    setStatus('読み取れませんでした。バーコードを横向きで近づけて撮影し直してください。', 'error');
     retryBtn.style.display = 'flex';
   };
   img.onerror = () => {
@@ -195,19 +212,17 @@ editInput.addEventListener('input', function() {
 });
 
 function updateBadge(n) {
-  digitBadge.textContent = n + ' / 15桁' + (n === 15 ? ' ✓' : '');
+  digitBadge.textContent = n + ' / 15桏' + (n === 15 ? ' ✓' : '');
   digitBadge.className = n === 15 ? 'ok' : 'ng';
 }
 
 function confirmNumber() {
   const num = editInput.value.replace(/\D/g, '');
   if (num.length !== 15) {
-    setStatus('15桁の番号を確認してください（現在' + num.length + '桁）', 'error');
+    setStatus('15桏の番号を確認してください（現在' + num.length + '桏）', 'error');
     return;
   }
-  if (window.opener) {
-    window.opener.postMessage({ type: 'BARCODE_RESULT', barcode: num }, '*');
-  }
+  if (window.opener) window.opener.postMessage({ type: 'BARCODE_RESULT', barcode: num }, '*');
   window.close();
 }
 
