@@ -9,7 +9,7 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, sans-serif; background: #000; color: #fff; height: 100vh; display: flex; justify-content: center; }
 
-  /* 画面全体のコンテナ */
+  /* 画面全体のコンテナ（iPadでもスマホ幅に固定して操作しやすく） */
   #app-container {
     width: 100%; max-width: 500px; height: 100%;
     display: flex; flex-direction: column; background: #111;
@@ -18,28 +18,30 @@
   #header { padding: 15px; background: #1a1a1a; text-align: center; border-bottom: 1px solid #333; z-index: 20; }
   #header h1 { font-size: 16px; font-weight: 700; }
 
-  /* --- 📷 カメラ領域（画面の上半分） --- */
+  /* --- 📷 カメラ領域（正方形に固定してズレを防止） --- */
   #camera-section {
-    position: relative; width: 100%; height: 50vh; min-height: 300px;
-    background: #000; overflow: hidden;
+    position: relative; width: 100%; background: #000; overflow: hidden;
+    /* 縦横比を1:1に近づけ、横画面でも縦画面でも安定させる */
+    aspect-ratio: 1 / 1;
+    display: flex; justify-content: center; align-items: center;
   }
   
-  #reader { width: 100%; height: 100%; }
-  #reader video { object-fit: cover !important; width: 100% !important; height: 100% !important; }
+  #reader { width: 100%; }
+  #reader video { width: 100% !important; display: block; }
   
-  /* ライブラリの余計な暗転・白枠を強制消去 */
+  /* ライブラリが勝手に出す白枠や暗転を完全に消去 */
   #qr-shaded-region { display: none !important; }
 
-  /* 読み取り成功時の「静止画」 */
+  /* 読み取り成功時の「静止画（スナップショット）」 */
   #snapshot {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    object-fit: cover; display: none; z-index: 5;
+    object-fit: contain; display: none; z-index: 5;
   }
 
   /* 自作の青枠 */
   #aim-frame {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 80%; height: 120px;
+    width: 80%; height: 140px; /* ここが解析領域と完全一致します */
     border: 3px solid #00e5ff; border-radius: 10px;
     pointer-events: none; z-index: 10;
     box-shadow: 0 0 20px rgba(0,0,0,0.6);
@@ -78,7 +80,7 @@
   .b-ok { background: #185FA5; color: #fff; }
   .b-retry { background: #333; color: #ccc; }
   
-  /* 閉じるボタン */
+  /* 閉じるボタン（常に下部に配置） */
   #close-btn-wrap { margin-top: auto; padding-top: 20px; width: 100%; }
   .b-close { width: 100%; padding: 14px; border-radius: 10px; background: #1a1a1a; color: #888; border: 1px solid #333; font-weight: bold; cursor: pointer; }
 
@@ -88,7 +90,7 @@
 
 <div id="app-container">
   <div id="header">
-    <h1>📷 バーコードスキャン11</h1>
+    <h1>📷 バーコードスキャン12</h1>
   </div>
 
   <!-- カメラと青枠の領域 -->
@@ -130,12 +132,19 @@ async function startScanner() {
 
   const config = {
     fps: 15,
+    aspectRatio: 1.0, // 🌟【超重要】カメラ映像を常に正方形に保ち、縦横のズレを根絶
+    qrbox: (viewfinderWidth, viewfinderHeight) => {
+      // 🌟【超重要】青枠のCSS（幅80%、高さ140px）と全く同じ計算式にして完全同期させる
+      return { 
+        width: Math.floor(viewfinderWidth * 0.8), 
+        height: 140 
+      };
+    },
     experimentalFeatures: { useBarCodeDetectorIfSupported: true },
     formatsToSupport: [ Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.ITF ]
   };
 
   try {
-    // 【修正箇所】エラーの原因になっていた独自解像度設定を削除し、確実に起動する標準設定に戻しました
     await scanner.start(
       { facingMode: "environment" },
       config,
@@ -143,22 +152,22 @@ async function startScanner() {
         if (!isScanning) return;
         const cleanCode = decodedText.replace(/\D/g, '');
         
-        // 15桁チェック
+        // 厳格な15桁チェック
         if (cleanCode.length === 15) {
           isScanning = false;
           onSuccess(cleanCode);
         }
       },
-      () => {} // スキャンエラーは無視
+      () => {} // スキャン中のエラーログは無視
     );
-    document.getElementById('status-msg').textContent = "15桁のバーコードを枠に合わせてください";
+    document.getElementById('status-msg').textContent = "15桁のバーコードを青枠に水平に合わせてください";
   } catch (err) {
     document.getElementById('status-msg').textContent = "カメラ起動エラー: " + err;
   }
 }
 
 function onSuccess(digits) {
-  // iOSフリーズ対策: カメラ映像から静止画を作成して表示
+  // 💡iOSフリーズ対策: カメラ映像から静止画を作成して表示
   try {
     const videoEl = document.querySelector('#reader video');
     if (videoEl) {
@@ -176,7 +185,7 @@ function onSuccess(digits) {
   // スキャナーを一時停止
   if (scanner) scanner.pause(true);
 
-  // UIの更新（カメラの下にボタンを出す）
+  // UIの更新
   document.getElementById('aim-frame').classList.add('success');
   document.getElementById('status-msg').style.display = 'none';
   document.getElementById('result-ui').style.display = 'block';
@@ -186,14 +195,12 @@ function onSuccess(digits) {
 }
 
 function doRetry() {
-  // UIを元に戻す
   document.getElementById('snapshot').style.display = 'none';
   document.getElementById('aim-frame').classList.remove('success');
   document.getElementById('result-ui').style.display = 'none';
   document.getElementById('status-msg').style.display = 'block';
   document.getElementById('einput').value = '';
 
-  // スキャナー再開
   if (scanner) scanner.resume();
   setTimeout(() => { isScanning = true; }, 300);
 }
@@ -223,4 +230,3 @@ window.onload = startScanner;
 </script>
 </body>
 </html>
-
