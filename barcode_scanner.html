@@ -6,22 +6,21 @@
 <title>バーコードスキャン</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',Arial,sans-serif;background:#111;color:#fff;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+body{font-family:-apple-system,sans-serif;background:#111;color:#fff;height:100vh;display:flex;flex-direction:column;}
 #header{padding:12px 16px 8px;flex-shrink:0;}
-#header h1{font-size:15px;font-weight:700;}
-#header p{font-size:11px;color:#888;margin-top:2px;}
-#video-wrap{position:relative;flex:1;overflow:hidden;background:#000;}
-#video{width:100%;height:100%;object-fit:cover;display:block;}
-#overlay{position:absolute;inset:0;pointer-events:none;}
-#aim-rect{position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);width:85%;height:22%;border:2px solid #00e5ff;border-radius:6px;box-shadow:0 0 0 9999px rgba(0,0,0,0.45);}
-#scanline{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#00e5ff,transparent);animation:scan 2s linear infinite;}
-@keyframes scan{0%{top:0;}100%{top:100%;}}
-#status-bar{position:absolute;bottom:0;left:0;right:0;padding:8px 12px;text-align:center;font-size:13px;font-weight:600;background:rgba(0,0,0,0.6);}
+h1{font-size:15px;font-weight:700;}
+p{font-size:11px;color:#888;margin-top:2px;}
+#video-wrap{position:relative;flex:1;background:#000;overflow:hidden;}
+video{width:100%;height:100%;object-fit:cover;}
+#aim{position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);width:85%;border:2px solid #00e5ff;border-radius:6px;padding-top:22%;}
+#line{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#00e5ff,transparent);animation:sc 2s linear infinite;}
+@keyframes sc{0%{top:0%}100%{top:100%}}
+#msg{position:absolute;bottom:0;left:0;right:0;padding:8px;text-align:center;font-size:13px;font-weight:600;background:rgba(0,0,0,0.6);}
 #footer{background:#181818;padding:12px 16px 20px;flex-shrink:0;}
-#result-wrap{display:none;margin-bottom:10px;}
-#result-num{font-size:22px;font-weight:700;letter-spacing:3px;font-family:monospace;text-align:center;padding:10px;background:#252525;border-radius:8px;margin-bottom:6px;}
-#edit-input{width:100%;font-size:18px;font-family:monospace;font-weight:700;letter-spacing:2px;padding:8px 10px;border-radius:8px;border:1.5px solid #444;background:#252525;color:#fff;text-align:center;}
-#edit-input:focus{outline:none;border-color:#00e5ff;}
+#result{display:none;margin-bottom:10px;}
+#rnum{font-size:22px;font-weight:700;letter-spacing:3px;font-family:monospace;text-align:center;padding:10px;background:#252525;border-radius:8px;margin-bottom:6px;}
+#einput{width:100%;font-size:18px;font-family:monospace;font-weight:700;letter-spacing:2px;padding:8px;border-radius:8px;border:1.5px solid #444;background:#252525;color:#fff;text-align:center;}
+#einput:focus{outline:none;border-color:#00e5ff;}
 #badge{text-align:center;font-size:12px;font-weight:700;padding:3px 0;}
 #badge.ok{color:#4caf50;}#badge.ng{color:#f44336;}
 .btns{display:flex;gap:8px;margin-top:8px;}
@@ -33,85 +32,54 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',Arial,sans-ser
 </style>
 </head>
 <body>
-<div id="header">
-  <h1>📷 バーコードスキャン</h1>
-  <p>バーコードを青枠に合わせてください</p>
-</div>
-
+<div id="header"><h1>📷 バーコードスキャン</h1><p>バーコードを青枠に合わせてください</p></div>
 <div id="video-wrap">
   <video id="video" autoplay playsinline muted></video>
-  <div id="overlay">
-    <div id="aim-rect">
-      <div id="scanline"></div>
-    </div>
-  </div>
-  <div id="status-bar">起動中...</div>
+  <div id="aim"><div id="line"></div></div>
+  <div id="msg">起動中...</div>
 </div>
-
 <div id="footer">
-  <div id="result-wrap">
-    <div id="result-num"></div>
-    <input type="tel" id="edit-input" maxlength="15" inputmode="numeric" placeholder="番号を確認・修正">
+  <div id="result">
+    <div id="rnum"></div>
+    <input type="tel" id="einput" maxlength="15" inputmode="numeric" placeholder="番号を確認・修正">
     <div id="badge"></div>
   </div>
   <div class="btns">
-    <button class="btn b-ok" id="btn-ok" onclick="confirm_()" style="display:none;">✅ 確定</button>
-    <button class="btn b-retry" id="btn-retry" onclick="restartScan()" style="display:none;">🔄 再スキャン</button>
-    <button class="btn b-close" onclick="closeWindow()">閉じる</button>
+    <button class="btn b-ok" id="bok" onclick="confirm_()" style="display:none;">✅ 確定</button>
+    <button class="btn b-retry" id="bretry" onclick="restart()" style="display:none;">🔄 再スキャン</button>
+    <button class="btn b-close" onclick="closeAll()">閉じる</button>
   </div>
 </div>
 
 <script>
-// ---- 設定 ----
-const INTERVAL_MS = 400; // スキャン間隔(ms)
-
-// ---- 状態 ----
-let stream = null;
-let timer  = null;
-let found  = false;
-const video   = document.getElementById('video');
-const statusBar = document.getElementById('status-bar');
-const scanline  = document.getElementById('scanline');
-
-// ---- Canvas再利用 ----
+const video = document.getElementById('video');
+const msg   = document.getElementById('msg');
 const canvas = document.createElement('canvas');
 const ctx    = canvas.getContext('2d', {willReadFrequently: true});
+let stream = null, timer = null, found = false;
 
-// ---- CODE-128デコーダ（純粋JS実装） ----
-// ZXingではなく独自の軽量デコーダを使用
-// バーの幅パターンからCODE-128を読み取る
-
-function getGray(data, w, h) {
-  // RGBA→グレースケール
-  const gray = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) {
-    gray[i] = (data[i*4]*77 + data[i*4+1]*150 + data[i*4+2]*29) >> 8;
+// ---- カメラ起動 ----
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: {ideal:'environment'}, width:{ideal:1280}, height:{ideal:720} }
+    });
+    video.srcObject = stream;
+    video.oncanplay = () => {
+      video.play().then(() => {
+        msg.style.color = '#00e5ff';
+        msg.textContent = 'バーコードを青枠に合わせてください';
+        timer = setTimeout(scan, 500);
+      });
+    };
+  } catch(e) {
+    msg.style.color = '#f44336';
+    msg.textContent = e.name === 'NotAllowedError' ? 'カメラを許可してください' : 'エラー: ' + e.message;
   }
-  return gray;
 }
 
-function otsuThreshold(gray) {
-  const hist = new Int32Array(256);
-  for (const v of gray) hist[v]++;
-  const n = gray.length;
-  let sum = 0;
-  for (let i = 0; i < 256; i++) sum += i * hist[i];
-  let sumB = 0, wB = 0, max = 0, thresh = 128;
-  for (let i = 0; i < 256; i++) {
-    wB += hist[i]; if (!wB) continue;
-    const wF = n - wB; if (!wF) break;
-    sumB += i * hist[i];
-    const mB = sumB / wB, mF = (sum - sumB) / wF;
-    const between = wB * wF * (mB - mF) * (mB - mF);
-    if (between > max) { max = between; thresh = i; }
-  }
-  return thresh;
-}
-
-// CODE-128 文字テーブル (値→文字)
-const C128 = ' !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
-
-const CODE128_PATTERNS = [
+// ---- CODE-128 スキャン ----
+const C128_PATTERNS = [
   212222,222122,222221,121223,121322,131222,122213,122312,132212,221213,
   221312,231212,112232,122132,122231,113222,123122,123221,223211,221132,
   221231,213212,223112,312131,311222,321122,321221,312212,322112,322211,
@@ -125,229 +93,150 @@ const CODE128_PATTERNS = [
   114131,311141,411131,211412,211214,211232,2331112
 ];
 
-function patternToCode128Value(bars) {
-  // bars: [b0,b1,...,b5] 各バーの相対幅（整数化）
+function ptnKey(bars) {
   const total = bars.reduce((a,b)=>a+b,0);
-  const scale = total / 11;
-  let key = 0, mul = 1;
+  if (total === 0) return -1;
+  const s = total / 11;
+  let k = 0, m = 1;
   for (let i = bars.length-1; i >= 0; i--) {
-    key += Math.round(bars[i]/scale) * mul;
-    mul *= 10;
+    k += Math.round(bars[i]/s) * m;
+    m *= 10;
   }
-  const idx = CODE128_PATTERNS.indexOf(key);
-  return idx; // -1なら不明
+  return C128_PATTERNS.indexOf(k);
 }
 
-function decodeCode128Row(gray, w, thresh) {
-  // 二値化
-  const bin = new Uint8Array(w);
-  for (let x = 0; x < w; x++) bin[x] = gray[x] < thresh ? 1 : 0;
-
-  // ランレングス（黒白交互のバー幅列）
+function scanRow(data, w, row) {
+  // グレースケール
+  const gray = new Uint8Array(w);
+  for (let x = 0; x < w; x++) {
+    const i = (row * w + x) * 4;
+    gray[x] = (data[i]*77 + data[i+1]*150 + data[i+2]*29) >> 8;
+  }
+  // 大津の二値化
+  const hist = new Int32Array(256);
+  for (const v of gray) hist[v]++;
+  const n = w;
+  let sum = 0; for (let i=0;i<256;i++) sum+=i*hist[i];
+  let sumB=0,wB=0,max=0,thresh=128;
+  for (let i=0;i<256;i++){
+    wB+=hist[i]; if(!wB) continue;
+    const wF=n-wB; if(!wF) break;
+    sumB+=i*hist[i];
+    const v=wB*wF*(sumB/wB-(sum-sumB)/wF)**2;
+    if(v>max){max=v;thresh=i;}
+  }
+  // ランレングス（黒=1から始まる）
+  const bin = gray.map(v => v < thresh ? 1 : 0);
   const runs = [];
-  let cur = bin[0], cnt = 1;
-  for (let x = 1; x < w; x++) {
-    if (bin[x] === cur) cnt++;
-    else { runs.push(cnt); cur = bin[x]; cnt = 1; }
+  let cur = bin[0], cnt = 1, startBlack = cur===1;
+  for (let x=1;x<w;x++){
+    if(bin[x]===cur) cnt++;
+    else { runs.push(cnt); cur=bin[x]; cnt=1; }
   }
   runs.push(cnt);
-
-  // 先頭が白なら先頭を削除（黒から始まる）
-  let start = 0;
-  if (bin[0] === 0) start = 1;
-
-  const bars = runs.slice(start);
-  if (bars.length < 13) return null;
-
-  // スタートコードを探す（3バー+チェック）
-  let decoded = [];
-  let i = 0;
-  let codeSet = -1; // A=0 B=1 C=2
-  let found = false;
-
-  // スタートコードを探す
-  for (let si = 0; si < bars.length - 6; si++) {
-    const seg = bars.slice(si, si+6);
-    const val = patternToCode128Value(seg);
-    if (val === 103) { codeSet = 0; i = si + 6; found = true; break; } // START A
-    if (val === 104) { codeSet = 1; i = si + 6; found = true; break; } // START B
-    if (val === 105) { codeSet = 2; i = si + 6; found = true; break; } // START C
+  // 白始まりなら先頭削除
+  let ri = startBlack ? 0 : 1;
+  // スタートコード検索
+  let codeSet = -1, i = ri;
+  for (; i < runs.length-6; i++) {
+    const v = ptnKey(runs.slice(i, i+6));
+    if (v===103){codeSet=0;i+=6;break;}
+    if (v===104){codeSet=1;i+=6;break;}
+    if (v===105){codeSet=2;i+=6;break;}
   }
-  if (!found) return null;
-
-  const values = [];
-  let checksum = (codeSet === 0 ? 103 : codeSet === 1 ? 104 : 105);
-  let pos = 1;
-
-  while (i + 6 <= bars.length) {
-    const seg = bars.slice(i, i+6);
-    const val = patternToCode128Value(seg);
-    if (val < 0) { i++; continue; }
-    if (val === 106) { // STOP
-      // チェックサム検証
-      const check = values[values.length-1];
-      values.pop();
-      if ((checksum % 103) === check) {
-        return values;
-      }
-      return values; // チェックサム無視でも返す
-    }
-    checksum += val * pos;
-    pos++;
-    values.push(val);
-    i += 6;
+  if (codeSet<0) return null;
+  // データ読み取り
+  const vals = [];
+  let chk = codeSet===0?103:codeSet===1?104:105, pos=1;
+  while (i+6 <= runs.length) {
+    const v = ptnKey(runs.slice(i,i+6));
+    if (v<0){i+=1;continue;}
+    if (v===106) break; // STOP
+    chk += v*pos; pos++;
+    vals.push(v); i+=6;
   }
-  return values.length > 0 ? values : null;
+  if (vals.length<2) return null;
+  // 値→文字列
+  let str='';
+  if (codeSet===2) {
+    for (const v of vals) str += (v<10?'0':'')+v;
+  } else {
+    const C=' !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
+    for (const v of vals) str += v<96 ? C[v] : '';
+  }
+  return str;
 }
 
-function valuesToString(values, codeSet) {
-  let result = '';
-  for (const v of values) {
-    if (codeSet === 1 && v < 96) result += C128[v];
-    else if (codeSet === 0 && v < 96) result += C128[v];
-    else if (codeSet === 2 && v < 100) result += (v < 10 ? '0' : '') + v;
-    else result += '?';
+function scan() {
+  if (found) return;
+  if (video.readyState < 2 || !video.videoWidth) { timer=setTimeout(scan,300); return; }
+  const vw=video.videoWidth, vh=video.videoHeight;
+  const sh=Math.round(vh*0.28), sy=Math.round(vh*0.36);
+  canvas.width=vw; canvas.height=sh;
+  ctx.drawImage(video, 0,sy,vw,sh, 0,0,vw,sh);
+  const data = ctx.getImageData(0,0,vw,sh).data;
+  const step = Math.max(1, Math.round(sh/15));
+  const candidates = [];
+  for (let row=0; row<sh; row+=step) {
+    const r = scanRow(data,vw,row);
+    if (r) candidates.push(r.replace(/\D/g,''));
   }
-  return result;
-}
-
-function scanFrame() {
-  if (found || !stream) return;
-  if (video.readyState < 2) return;
-
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  if (!vw || !vh) return;
-
-  // バーコード認識用に横長に切り抜く（中央帯）
-  const scanH = Math.round(vh * 0.25);
-  const scanY = Math.round(vh * 0.38);
-
-  canvas.width = vw;
-  canvas.height = scanH;
-  ctx.drawImage(video, 0, scanY, vw, scanH, 0, 0, vw, scanH);
-  const imageData = ctx.getImageData(0, 0, vw, scanH);
-
-  // 複数の水平ラインでスキャン
-  const results = [];
-  for (let row = 0; row < scanH; row += Math.max(1, Math.round(scanH/12))) {
-    const gray = new Uint8Array(vw);
-    for (let x = 0; x < vw; x++) {
-      const i = (row * vw + x) * 4;
-      gray[x] = (imageData.data[i]*77 + imageData.data[i+1]*150 + imageData.data[i+2]*29) >> 8;
-    }
-    const thresh = otsuThreshold(gray);
-    const vals = decodeCode128Row(gray, vw, thresh);
-    if (vals && vals.length > 0) {
-      // 数字として解釈
-      let str = '';
-      for (const v of vals) {
-        if (v < 100) str += (v < 10 ? '0' : '') + v;
-      }
-      if (/^\d{10,15}$/.test(str)) results.push(str);
-      else {
-        // コードセットBとして解釈
-        let strB = '';
-        for (const v of vals) {
-          if (v >= 0 && v < 96) strB += C128[v];
-        }
-        const digs = strB.replace(/\D/g,'');
-        if (digs.length >= 10) results.push(digs);
-      }
-    }
+  // 最も多い結果を採用
+  if (candidates.length>0) {
+    const freq={};
+    for (const c of candidates) freq[c]=(freq[c]||0)+1;
+    const best = Object.keys(freq).sort((a,b)=>freq[b]-freq[a])[0];
+    if (best && best.length>=10) { onFound(best.slice(0,15)); return; }
   }
-
-  if (results.length > 0) {
-    // 最も長い結果を採用
-    const best = results.reduce((a,b) => b.length > a.length ? b : a, results[0]);
-    const digits = best.replace(/\D/g,'').slice(0,15);
-    if (digits.length >= 10) {
-      onFound(digits);
-      return;
-    }
-  }
-
-  timer = setTimeout(scanFrame, INTERVAL_MS);
-}
-
-async function startCamera() {
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: {ideal: 'environment'},
-        width: {ideal: 1280},
-        height: {ideal: 720}
-      }
-    });
-    video.srcObject = stream;
-    await video.play();
-    statusBar.style.color = '#00e5ff';
-    statusBar.textContent = 'バーコードを青枠に合わせてください';
-    timer = setTimeout(scanFrame, 500);
-  } catch(err) {
-    statusBar.style.color = '#f44336';
-    statusBar.textContent = err.name === 'NotAllowedError'
-      ? 'カメラの許可が必要です'
-      : 'カメラエラー: ' + err.message;
-  }
+  timer = setTimeout(scan, 350);
 }
 
 function onFound(digits) {
-  found = true;
-  clearTimeout(timer);
-  scanline.style.display = 'none';
-  statusBar.style.color = '#4caf50';
-  statusBar.textContent = '✓ 読み取り成功！';
-  document.getElementById('result-num').textContent = digits;
-  document.getElementById('edit-input').value = digits;
-  document.getElementById('result-wrap').style.display = 'block';
-  document.getElementById('btn-ok').style.display = 'flex';
-  document.getElementById('btn-retry').style.display = 'flex';
+  found=true; clearTimeout(timer);
+  document.getElementById('line').style.display='none';
+  msg.style.color='#4caf50';
+  msg.textContent='✓ 読み取り成功！';
+  document.getElementById('rnum').textContent=digits;
+  document.getElementById('einput').value=digits;
+  document.getElementById('result').style.display='block';
+  document.getElementById('bok').style.display='flex';
+  document.getElementById('bretry').style.display='flex';
   updateBadge(digits.length);
 }
 
-document.getElementById('edit-input').addEventListener('input', function() {
-  this.value = this.value.replace(/\D/g,'').slice(0,15);
-  document.getElementById('result-num').textContent = this.value;
+document.getElementById('einput').addEventListener('input',function(){
+  this.value=this.value.replace(/\D/g,'').slice(0,15);
+  document.getElementById('rnum').textContent=this.value;
   updateBadge(this.value.length);
 });
 
-function updateBadge(n) {
-  const el = document.getElementById('badge');
-  el.textContent = n + ' / 15桁' + (n===15 ? ' ✓' : '');
-  el.className = n===15 ? 'ok' : 'ng';
+function updateBadge(n){
+  const el=document.getElementById('badge');
+  el.textContent=n+' / 15桁'+(n===15?' ✓':'');
+  el.className=n===15?'ok':'ng';
 }
 
-function confirm_() {
-  const num = document.getElementById('edit-input').value.replace(/\D/g,'');
-  if (num.length !== 15) {
-    statusBar.style.color = '#f44336';
-    statusBar.textContent = '15桁を確認してください（現在' + num.length + '桁）';
-    return;
-  }
-  if (window.opener) window.opener.postMessage({type:'BARCODE_RESULT', barcode:num}, '*');
-  stopAll();
-  window.close();
+function confirm_(){
+  const num=document.getElementById('einput').value.replace(/\D/g,'');
+  if(num.length!==15){msg.style.color='#f44336';msg.textContent='15桁を確認してください（現在'+num.length+'桁）';return;}
+  if(window.opener) window.opener.postMessage({type:'BARCODE_RESULT',barcode:num},'*');
+  closeAll();
 }
 
-function restartScan() {
-  found = false;
-  document.getElementById('result-wrap').style.display = 'none';
-  document.getElementById('btn-ok').style.display = 'none';
-  document.getElementById('btn-retry').style.display = 'none';
-  scanline.style.display = 'block';
-  statusBar.style.color = '#00e5ff';
-  statusBar.textContent = 'バーコードを青枠に合わせてください';
-  timer = setTimeout(scanFrame, 300);
+function restart(){
+  found=false;
+  document.getElementById('result').style.display='none';
+  document.getElementById('bok').style.display='none';
+  document.getElementById('bretry').style.display='none';
+  document.getElementById('line').style.display='block';
+  msg.style.color='#00e5ff';
+  msg.textContent='バーコードを青枠に合わせてください';
+  timer=setTimeout(scan,300);
 }
 
-function stopAll() {
+function closeAll(){
   clearTimeout(timer);
-  if (stream) stream.getTracks().forEach(t => t.stop());
-}
-
-function closeWindow() {
-  stopAll();
+  if(stream) stream.getTracks().forEach(t=>t.stop());
   window.close();
 }
 
