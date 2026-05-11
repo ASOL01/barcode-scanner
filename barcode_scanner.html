@@ -1,1 +1,272 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>バーコードスキャン</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+/* iPad対策: 画面が大きすぎるので最大幅を制限して中央に寄せる */
+body{font-family:-apple-system,sans-serif;background:#111;color:#fff;height:100vh;display:flex;justify-content:center;align-items:center;}
+#app-container {width:100%;max-width:500px;height:100%;display:flex;flex-direction:column;background:#000;position:relative;overflow:hidden;}
+
+#header{padding:12px 16px 8px;flex-shrink:0;background:#111;z-index:10;}
+#header h1{font-size:15px;font-weight:700;}
+#header p{font-size:11px;color:#888;margin-top:2px;}
+
+#video-wrap{position:relative;flex:1;background:#000;overflow:hidden;}
+video{width:100%;height:100%;object-fit:cover;display:block;}
+
+/* 青枠のサイズを調整 */
+#aim{position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);width:80%;border:2px solid #00e5ff;border-radius:6px;padding-top:25%;pointer-events:none;}
+#scanline{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#00e5ff,transparent);animation:sc 2s linear infinite;}
+@keyframes sc{0%{top:0%}100%{top:100%}}
+
+#msg{position:absolute;bottom:0;left:0;right:0;padding:8px;text-align:center;font-size:13px;font-weight:600;background:rgba(0,0,0,0.6);z-index:5;}
+
+#footer{background:#181818;padding:12px 16px 20px;flex-shrink:0;z-index:10;}
+#result{display:none;margin-bottom:10px;}
+#rnum{font-size:22px;font-weight:700;letter-spacing:3px;font-family:monospace;text-align:center;padding:10px;background:#252525;border-radius:8px;margin-bottom:6px;}
+#einput{width:100%;font-size:18px;font-family:monospace;font-weight:700;letter-spacing:2px;padding:8px;border-radius:8px;border:1.5px solid #444;background:#252525;color:#fff;text-align:center;}
+#badge{text-align:center;font-size:12px;font-weight:700;padding:3px 0;}
+#badge.ok{color:#4caf50;}#badge.ng{color:#f44336;}
+.btns{display:flex;gap:8px;margin-top:8px;}
+.btn{flex:1;padding:12px;border-radius:10px;font-size:14px;font-weight:700;border:none;cursor:pointer;}
+.b-ok{background:#185FA5;color:#fff;}
+.b-retry{background:#333;color:#ccc;}
+.b-close{background:#1a1a1a;color:#777;border:0.5px solid #333;}
+</style>
+</head>
+<body>
+
+<div id="app-container">
+  <div id="header">
+    <h1>📷 バーコードスキャン</h1>
+    <p>バーコードを水平に合わせてください</p>
+  </div>
+
+  <div id="video-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="aim"><div id="scanline"></div></div>
+    <div id="msg">カメラ起動中...</div>
+  </div>
+
+  <div id="footer">
+    <div id="result">
+      <div id="rnum"></div>
+      <input type="tel" id="einput" maxlength="15" inputmode="numeric">
+      <div id="badge"></div>
+    </div>
+    <div class="btns">
+      <button class="btn b-ok" id="bok" onclick="doConfirm()" style="display:none;">✅ 確定</button>
+      <button class="btn b-retry" id="bretry" onclick="doRestart()" style="display:none;">🔄 再試キャン</button>
+      <button class="btn b-close" onclick="doClose()">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var video  = document.getElementById('video');
+var msg    = document.getElementById('msg');
+var stream = null;
+var timer  = null;
+var found  = false;
+var canvas = document.createElement('canvas');
+var ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+// --- 前処理 ---
+function toGray(data, w, row) {
+  var pixels = new Array(w);
+  for (var x = 0; x < w; x++) {
+    var i = (row * w + x) * 4;
+    pixels[x] = (data[i] * 77 + data[i+1] * 150 + data[i+2] * 29) >> 8;
+  }
+  return pixels;
+}
+
+function otsuThresh(pixels) {
+  var hist = new Array(256).fill(0);
+  for (var i = 0; i < pixels.length; i++) hist[pixels[i]]++;
+  var n = pixels.length, sum = 0;
+  for (var i = 0; i < 256; i++) sum += i * hist[i];
+  var sumB = 0, wB = 0, maxV = 0, thresh = 128;
+  for (var i = 0; i < 256; i++) {
+    wB += hist[i]; var wF = n - wB; if (!wB || !wF) continue;
+    sumB += i * hist[i];
+    var d = sumB / wB - (sum - sumB) / wF;
+    var v = wB * wF * d * d;
+    if (v > maxV) { maxV = v; thresh = i; }
+  }
+  return thresh;
+}
+
+function runLength(pixels, thresh) {
+  var runs = [], cur = pixels[0] <= thresh, cnt = 1;
+  for (var i = 1; i < pixels.length; i++) {
+    var b = pixels[i] <= thresh;
+    if (b === cur) cnt++;
+    else { runs.push({v: cur, n: cnt}); cur = b; cnt = 1; }
+  }
+  runs.push({v: cur, n: cnt});
+  return runs;
+}
+
+// ========== CODE-128 解析強化 (チェックサム追加) ==========
+var C128_PAT = [[2,1,2,2,2,2],[2,2,2,1,2,2],[2,2,2,2,2,1],[1,2,1,2,2,3],[1,2,1,3,2,2],[1,3,1,2,2,2],[1,2,2,2,1,3],[1,2,2,3,1,2],[1,3,2,2,1,2],[2,2,1,2,1,3],[2,2,1,3,1,2],[2,3,1,2,1,2],[1,1,2,2,3,2],[1,2,2,1,3,2],[1,2,2,2,3,1],[1,1,3,2,2,2],[1,2,3,1,2,2],[1,2,3,2,2,1],[2,2,3,2,1,1],[2,2,1,1,3,2],[2,2,1,2,3,1],[2,1,3,2,1,2],[2,2,3,1,1,2],[3,1,2,1,3,1],[3,1,1,2,2,2],[3,2,1,1,2,2],[3,2,1,2,2,1],[3,1,2,2,1,2],[3,2,2,1,1,2],[3,2,2,2,1,1],[2,1,2,1,2,3],[2,1,2,3,2,1],[2,3,2,1,2,1],[1,1,1,3,2,3],[1,3,1,1,2,3],[1,3,1,3,2,1],[1,1,2,3,1,3],[1,3,2,1,1,3],[1,3,2,3,1,1],[2,1,1,3,1,3],[2,3,1,1,1,3],[2,3,1,3,1,1],[1,1,2,1,3,3],[1,1,2,3,3,1],[1,3,2,1,3,1],[1,1,3,1,2,3],[1,1,3,3,2,1],[1,3,3,1,2,1],[3,1,3,1,2,1],[2,1,1,3,3,1],[2,3,1,1,3,1],[2,1,3,1,1,3],[2,1,3,3,1,1],[2,1,3,1,3,1],[3,1,1,1,2,3],[3,1,1,3,2,1],[3,3,1,1,2,1],[3,1,2,1,1,3],[3,1,2,3,1,1],[3,3,2,1,1,1],[3,1,4,1,1,1],[2,2,1,4,1,1],[4,3,1,1,1,1],[1,1,1,2,2,4],[1,1,1,4,2,2],[1,2,1,1,2,4],[1,2,1,4,2,1],[1,4,1,1,2,2],[1,4,1,2,2,1],[1,1,2,2,1,4],[1,1,2,4,1,2],[1,2,2,1,1,4],[1,2,2,4,1,1],[1,4,2,1,1,2],[1,4,2,2,1,1],[2,4,1,2,1,1],[2,2,1,1,1,4],[4,1,3,1,1,1],[2,4,1,1,1,2],[1,3,4,1,1,1],[1,1,1,2,4,2],[1,2,1,1,4,2],[1,2,1,2,4,1],[1,1,4,2,1,2],[1,2,4,1,1,2],[1,2,4,2,1,1],[4,1,1,2,1,2],[4,2,1,1,1,2],[4,2,1,2,1,1],[2,1,2,1,4,1],[2,1,4,1,2,1],[4,1,2,1,2,1],[1,1,1,1,4,3],[1,1,1,3,4,1],[1,3,1,1,4,1],[1,1,4,1,1,3],[1,1,4,3,1,1],[4,1,1,1,1,3],[4,1,1,3,1,1],[1,1,3,1,4,1],[1,1,4,1,3,1],[3,1,1,1,4,1],[4,1,1,1,3,1],[2,1,1,4,1,2],[2,1,1,2,1,4],[2,1,1,2,3,2],[2,3,3,1,1,1,2]];
+
+function matchC128(bars) {
+  if (bars.length < 6) return -1;
+  var total = 0; for (var i = 0; i < 6; i++) total += bars[i];
+  var unit = total / 11.0;
+  for (var p = 0; p < C128_PAT.length; p++) {
+    var ok = true;
+    for (var i = 0; i < 6; i++) {
+      if (Math.abs(bars[i] - C128_PAT[p][i] * unit) > unit * 0.45 + 0.5) { ok = false; break; }
+    }
+    if (ok) return p;
+  }
+  return -1;
+}
+
+function decodeC128(runs) {
+  var startIdx = runs[0].v ? 0 : 1;
+  var bars = []; for (var i = startIdx; i < runs.length; i++) bars.push(runs[i].n);
+  
+  var codeSet = -1, pos = 0, checksum = 0;
+  for (var i = 0; i <= bars.length - 6; i++) {
+    var v = matchC128(bars.slice(i, i+6));
+    if (v >= 103 && v <= 105) { codeSet = v - 103; checksum = v; pos = i + 6; break; }
+  }
+  if (codeSet < 0) return null;
+
+  var values = [], count = 1;
+  while (pos + 5 < bars.length) {
+    var v = matchC128(bars.slice(pos, pos+6));
+    if (v < 0) { pos++; continue; }
+    if (v === 106) break; // STOP
+    checksum += v * count++;
+    values.push(v);
+    pos += 6;
+  }
+  if (values.length < 2) return null;
+  
+  // チェックサム検証
+  var check = values.pop();
+  if (checksum % 103 !== check) return null; // ここで誤読をガード！
+
+  var result = '';
+  for (var i = 0; i < values.length; i++) {
+    var v = values[i];
+    if (codeSet === 2) { // Set C (数字ペア)
+      result += (v < 10 ? '0' : '') + v;
+    } else {
+      var CB = ' !"#$%&\'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
+      if (v < CB.length) result += CB[v];
+    }
+  }
+  return result;
+}
+
+// ========== スキャン処理 (iPad/iOS最適化) ==========
+function doScan() {
+  if (found) return;
+  if (video.readyState < 2 || !video.videoWidth) { timer = setTimeout(doScan, 300); return; }
+
+  // 高解像度デバイス対応: videoWidthを使って計算
+  var vw = video.videoWidth;
+  var vh = video.videoHeight;
+  
+  // 切り抜き範囲を青枠に完全一致させる
+  var cropW = vw * 0.8; 
+  var cropH = vh * 0.2; 
+  var cropX = (vw - cropW) / 2;
+  var cropY = (vh - cropH) / 2 - (vh * 0.1);
+
+  // 解析用キャンバスサイズ（固定解像度で安定させる）
+  canvas.width = 800; 
+  canvas.height = 200;
+  ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
+
+  var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  var data = imageData.data;
+  var results = [];
+
+  // スキャン密度を上げる
+  for (var row = 20; row < canvas.height - 20; row += 4) {
+    var pixels = toGray(data, canvas.width, row);
+    var thresh = otsuThresh(pixels);
+    var runs = runLength(pixels, thresh);
+    var res = decodeC128(runs);
+    if (res) results.push(res);
+  }
+
+  // 複数行で同じ結果が出たら確定
+  if (results.length > 0) {
+    var counts = {};
+    results.forEach(r => counts[r] = (counts[r] || 0) + 1);
+    for (var r in counts) {
+      if (counts[r] >= 2) { onFound(r.replace(/\D/g, '').slice(0, 15)); return; }
+    }
+  }
+  timer = setTimeout(doScan, 200);
+}
+
+function onFound(digits) {
+  found = true; clearTimeout(timer);
+  document.getElementById('scanline').style.display = 'none';
+  msg.textContent = '✓ 読み取り成功';
+  document.getElementById('rnum').textContent = digits;
+  document.getElementById('einput').value = digits;
+  document.getElementById('result').style.display = 'block';
+  document.getElementById('bok').style.display = 'block';
+  document.getElementById('bretry').style.display = 'block';
+}
+
+// ========== カメラ起動 (iOS対応版) ==========
+function startCamera() {
+  var constraints = {
+    video: { 
+      facingMode: 'environment',
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    }
+  };
+
+  navigator.mediaDevices.getUserMedia(constraints).then(function(s) {
+    stream = s;
+    video.srcObject = s;
+    video.setAttribute("playsinline", true); // iOS Safari対策
+    video.play();
+    msg.textContent = "バーコードを枠に合わせてください";
+    timer = setTimeout(doScan, 1000);
+  }).catch(function(err) {
+    msg.textContent = "カメラエラー: " + err.name;
+    console.error(err);
+  });
+}
+
+function doRestart() {
+  found = false;
+  document.getElementById('result').style.display = 'none';
+  document.getElementById('bok').style.display = 'none';
+  document.getElementById('bretry').style.display = 'none';
+  document.getElementById('scanline').style.display = 'block';
+  doScan();
+}
+
+function doClose() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  window.close();
+}
+
+function doConfirm() {
+  var num = document.getElementById('einput').value;
+  if (window.opener) window.opener.postMessage({ type: 'BARCODE_RESULT', barcode: num }, '*');
+  doClose();
+}
+
+window.onload = startCamera;
+</script>
+</body>
+</html>
 
