@@ -9,7 +9,7 @@
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,sans-serif;background:#000;color:#fff;height:100vh;display:flex;justify-content:center;overflow:hidden;}
 
-/* 全体コンテナ: iPadでもズレないように中央固定 */
+/* 全体コンテナ: iPad/スマホ共通 */
 #app-container {
   width: 100%; max-width: 500px; height: 100%;
   display: flex; flex-direction: column; position: relative; background: #000;
@@ -19,25 +19,36 @@ body{font-family:-apple-system,sans-serif;background:#000;color:#fff;height:100v
 #header h1{font-size:16px; font-weight:700;}
 #header p{font-size:11px; color:#aaa; margin-top:4px;}
 
-/* スキャナー領域: 画面いっぱいに広げる */
+/* スキャナー領域 */
 #reader-wrap {
   flex: 1; position: relative; overflow: hidden; background: #000;
 }
 #reader { width: 100%; height: 100%; }
-/* ライブラリの余計なUI（白枠やビデオの余白）を強制非表示 */
-#reader video { object-fit: cover !important; width: 100% !important; height: 100% !important; }
-#reader__scan_region { border: none !important; }
 
-/* --- 独自UI: 青枠（成功時に緑に変化） --- */
+/* --- 【重要】ライブラリの不要なUI（白枠・ガイド）を徹底的に消す --- */
+#reader__scan_region { border: none !important; }
+#reader__scan_region img { display: none !important; } /* カメラ許可待ちの画像等も非表示 */
+#reader video { 
+  object-fit: cover !important; 
+  width: 100% !important; 
+  height: 100% !important; 
+}
+
+/* --- 自作の青枠（これだけに統一） --- */
 #aim-frame {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -60%);
-  width: 80%; height: 120px; /* バーコードに最適な横長サイズ */
+  width: 80%; height: 140px; /* バーコードが入りやすい高さに調整 */
   border: 3px solid #00e5ff; border-radius: 12px;
   pointer-events: none; z-index: 10;
-  transition: all 0.3s ease; /* 色変化を滑らかに */
-  box-shadow: 0 0 20px rgba(0,0,0,0.5);
+  transition: all 0.3s ease;
+  box-shadow: 0 0 20px rgba(0,0,0,0.5), inset 0 0 10px rgba(0,0,0,0.5);
 }
-#aim-frame.success { border-color: #4caf50; background: rgba(76, 175, 80, 0.1); }
+/* 成功時の緑枠 */
+#aim-frame.success { 
+  border-color: #4caf50; 
+  background: rgba(76, 175, 80, 0.1); 
+  box-shadow: 0 0 30px rgba(76, 175, 80, 0.4);
+}
 
 #scanline {
   position: absolute; top: 0; left: 0; right: 0; height: 2px;
@@ -54,7 +65,7 @@ body{font-family:-apple-system,sans-serif;background:#000;color:#fff;height:100v
   background: rgba(0,0,0,0.7); border-radius: 8px; z-index: 20;
 }
 
-/* フッター（結果表示） */
+/* フッター */
 #footer {
   background: #111; padding: 15px 15px 30px; flex-shrink:0; z-index: 20;
   border-top: 1px solid #333;
@@ -79,7 +90,7 @@ body{font-family:-apple-system,sans-serif;background:#000;color:#fff;height:100v
 
 <div id="app-container">
   <div id="header">
-    <h1>📷 バーコードスキャン5</h1>
+    <h1>📷 バーコードスキャン</h1>
     <p>青枠内にバーコードを水平に合わせてください</p>
   </div>
 
@@ -88,7 +99,7 @@ body{font-family:-apple-system,sans-serif;background:#000;color:#fff;height:100v
     <div id="aim-frame" id="aim-frame">
       <div id="scanline"></div>
     </div>
-    <div id="msg">カメラを起動しています...</div>
+    <div id="msg">カメラを起動中...</div>
   </div>
 
   <div id="footer">
@@ -109,18 +120,20 @@ const msg = document.getElementById('msg');
 const frame = document.getElementById('aim-frame');
 
 async function startScanner() {
-  if (html5QrCode) await html5QrCode.clear();
+  if (html5QrCode) {
+    try { await html5QrCode.clear(); } catch(e) {}
+  }
   html5QrCode = new Html5Qrcode("reader");
 
   const config = {
-    fps: 20, // フレームレートを上げてレスポンス向上
+    fps: 20,
+    // スキャン範囲を自作青枠のサイズ (80% x 140px) に厳密に合わせる
     qrbox: (viewWidth, viewHeight) => {
-        // iPad/スマホ両方で枠の位置とスキャン範囲を完全同期させる
-        return { width: viewWidth * 0.8, height: 120 };
+        const width = viewWidth * 0.8;
+        return { width: width, height: 140 };
     },
     aspectRatio: 1.0,
     experimentalFeatures: {
-        // iPhoneでBarcodeDetector APIが使える場合は優先使用（爆速化の鍵）
         useBarCodeDetectorIfSupported: true 
     },
     formatsToSupport: [ 
@@ -137,18 +150,20 @@ async function startScanner() {
         const cleanCode = decodedText.replace(/\D/g, '').slice(0, 15);
         if (cleanCode.length >= 10) onSuccess(cleanCode);
       },
-      () => {} // エラーは無視
+      () => {} 
     );
     msg.textContent = "枠に合わせてください";
   } catch (err) {
-    msg.textContent = "エラー: " + err;
+    msg.textContent = "カメラの起動に失敗しました";
+    console.error(err);
   }
 }
 
 function onSuccess(digits) {
-  html5QrCode.pause(true); // スキャン一時停止
+  // スキャナーを一時停止してフリーズを防ぐ
+  if(html5QrCode.isScanning) html5QrCode.pause(true);
   
-  // UIフィードバック: 枠を緑色にする
+  // UIフィードバック
   frame.classList.add('success');
   msg.style.color = '#4caf50';
   msg.textContent = "✓ 読み取り成功";
@@ -169,15 +184,26 @@ function doRestart() {
   document.getElementById('bretry').style.display = 'none';
   msg.style.color = '#fff';
   msg.textContent = "枠に合わせてください";
-  html5QrCode.resume();
+  
+  // 再開
+  if (html5QrCode) html5QrCode.resume();
 }
 
 function doConfirm() {
   const val = document.getElementById('einput').value;
   if (window.opener) window.opener.postMessage({ type: 'BARCODE_RESULT', barcode: val }, '*');
-  if (html5QrCode) html5QrCode.stop().then(() => window.close());
-  else window.close();
+  
+  if (html5QrCode) {
+    html5QrCode.stop().then(() => window.close()).catch(() => window.close());
+  } else {
+    window.close();
+  }
 }
+
+// ページを離れるときにカメラを解放
+window.onbeforeunload = () => {
+  if (html5QrCode) html5QrCode.stop();
+};
 
 window.onload = startScanner;
 </script>
