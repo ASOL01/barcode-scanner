@@ -1,1 +1,246 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>バーコードスキャン</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,sans-serif;background:#111;color:#fff;height:100vh;display:flex;flex-direction:column;}
+#header{padding:12px 16px 8px;flex-shrink:0;}
+h1{font-size:15px;font-weight:700;}
+p{font-size:11px;color:#888;margin-top:2px;}
+#video-wrap{position:relative;flex:1;background:#000;overflow:hidden;}
+video{width:100%;height:100%;object-fit:cover;}
+#aim{position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);width:85%;border:2px solid #00e5ff;border-radius:6px;padding-top:22%;}
+#line{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#00e5ff,transparent);animation:sc 2s linear infinite;}
+@keyframes sc{0%{top:0%}100%{top:100%}}
+#msg{position:absolute;bottom:0;left:0;right:0;padding:8px;text-align:center;font-size:13px;font-weight:600;background:rgba(0,0,0,0.6);}
+#footer{background:#181818;padding:12px 16px 20px;flex-shrink:0;}
+#result{display:none;margin-bottom:10px;}
+#rnum{font-size:22px;font-weight:700;letter-spacing:3px;font-family:monospace;text-align:center;padding:10px;background:#252525;border-radius:8px;margin-bottom:6px;}
+#einput{width:100%;font-size:18px;font-family:monospace;font-weight:700;letter-spacing:2px;padding:8px;border-radius:8px;border:1.5px solid #444;background:#252525;color:#fff;text-align:center;}
+#einput:focus{outline:none;border-color:#00e5ff;}
+#badge{text-align:center;font-size:12px;font-weight:700;padding:3px 0;}
+#badge.ok{color:#4caf50;}#badge.ng{color:#f44336;}
+.btns{display:flex;gap:8px;margin-top:8px;}
+.btn{flex:1;padding:12px;border-radius:10px;font-size:14px;font-weight:700;border:none;cursor:pointer;}
+.btn:active{opacity:.7;}
+.b-ok{background:#185FA5;color:#fff;}
+.b-retry{background:#333;color:#ccc;}
+.b-close{background:#1a1a1a;color:#777;border:0.5px solid #333;}
+</style>
+</head>
+<body>
+<div id="header"><h1>📷 バーコードスキャン</h1><p>バーコードを青枠に合わせてください</p></div>
+<div id="video-wrap">
+  <video id="video" autoplay playsinline muted></video>
+  <div id="aim"><div id="line"></div></div>
+  <div id="msg">起動中...</div>
+</div>
+<div id="footer">
+  <div id="result">
+    <div id="rnum"></div>
+    <input type="tel" id="einput" maxlength="15" inputmode="numeric" placeholder="番号を確認・修正">
+    <div id="badge"></div>
+  </div>
+  <div class="btns">
+    <button class="btn b-ok" id="bok" onclick="confirm_()" style="display:none;">✅ 確定</button>
+    <button class="btn b-retry" id="bretry" onclick="restart()" style="display:none;">🔄 再スキャン</button>
+    <button class="btn b-close" onclick="closeAll()">閉じる</button>
+  </div>
+</div>
 
+<script>
+const video = document.getElementById('video');
+const msg   = document.getElementById('msg');
+const canvas = document.createElement('canvas');
+const ctx    = canvas.getContext('2d', {willReadFrequently: true});
+let stream = null, timer = null, found = false;
+
+// ---- カメラ起動 ----
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: {ideal:'environment'}, width:{ideal:1280}, height:{ideal:720} }
+    });
+    video.srcObject = stream;
+    video.oncanplay = () => {
+      video.play().then(() => {
+        msg.style.color = '#00e5ff';
+        msg.textContent = 'バーコードを青枠に合わせてください';
+        timer = setTimeout(scan, 500);
+      });
+    };
+  } catch(e) {
+    msg.style.color = '#f44336';
+    msg.textContent = e.name === 'NotAllowedError' ? 'カメラを許可してください' : 'エラー: ' + e.message;
+  }
+}
+
+// ---- CODE-128 スキャン ----
+const C128_PATTERNS = [
+  212222,222122,222221,121223,121322,131222,122213,122312,132212,221213,
+  221312,231212,112232,122132,122231,113222,123122,123221,223211,221132,
+  221231,213212,223112,312131,311222,321122,321221,312212,322112,322211,
+  212123,212321,232121,111323,131123,131321,112313,132113,132311,211313,
+  231113,231311,112133,112331,132131,113123,113321,133121,313121,211331,
+  231131,213113,213311,213131,311123,311321,331121,312113,312311,332111,
+  314111,221411,431111,111224,111422,121124,121421,141122,141221,112214,
+  112412,122114,122411,142112,142211,241211,221114,413111,241112,134111,
+  111242,121142,121241,114212,124112,124211,411212,421112,421211,212141,
+  214121,412121,111143,111341,131141,114113,114311,411113,411311,113141,
+  114131,311141,411131,211412,211214,211232,2331112
+];
+
+function ptnKey(bars) {
+  const total = bars.reduce((a,b)=>a+b,0);
+  if (total === 0) return -1;
+  const s = total / 11;
+  let k = 0, m = 1;
+  for (let i = bars.length-1; i >= 0; i--) {
+    k += Math.round(bars[i]/s) * m;
+    m *= 10;
+  }
+  return C128_PATTERNS.indexOf(k);
+}
+
+function scanRow(data, w, row) {
+  // グレースケール
+  const gray = new Uint8Array(w);
+  for (let x = 0; x < w; x++) {
+    const i = (row * w + x) * 4;
+    gray[x] = (data[i]*77 + data[i+1]*150 + data[i+2]*29) >> 8;
+  }
+  // 大津の二値化
+  const hist = new Int32Array(256);
+  for (const v of gray) hist[v]++;
+  const n = w;
+  let sum = 0; for (let i=0;i<256;i++) sum+=i*hist[i];
+  let sumB=0,wB=0,max=0,thresh=128;
+  for (let i=0;i<256;i++){
+    wB+=hist[i]; if(!wB) continue;
+    const wF=n-wB; if(!wF) break;
+    sumB+=i*hist[i];
+    const d=(sumB/wB-(sum-sumB)/wF); const v=wB*wF*d*d;
+    if(v>max){max=v;thresh=i;}
+  }
+  // ランレングス（黒=1から始まる）
+  const bin = gray.map(v => v < thresh ? 1 : 0);
+  const runs = [];
+  let cur = bin[0], cnt = 1, startBlack = cur===1;
+  for (let x=1;x<w;x++){
+    if(bin[x]===cur) cnt++;
+    else { runs.push(cnt); cur=bin[x]; cnt=1; }
+  }
+  runs.push(cnt);
+  // 白始まりなら先頭削除
+  let ri = startBlack ? 0 : 1;
+  // スタートコード検索
+  let codeSet = -1, i = ri;
+  for (; i < runs.length-6; i++) {
+    const v = ptnKey(runs.slice(i, i+6));
+    if (v===103){codeSet=0;i+=6;break;}
+    if (v===104){codeSet=1;i+=6;break;}
+    if (v===105){codeSet=2;i+=6;break;}
+  }
+  if (codeSet<0) return null;
+  // データ読み取り
+  const vals = [];
+  let chk = codeSet===0?103:codeSet===1?104:105, pos=1;
+  while (i+6 <= runs.length) {
+    const v = ptnKey(runs.slice(i,i+6));
+    if (v<0){i+=1;continue;}
+    if (v===106) break; // STOP
+    chk += v*pos; pos++;
+    vals.push(v); i+=6;
+  }
+  if (vals.length<2) return null;
+  // 値→文字列
+  let str='';
+  if (codeSet===2) {
+    for (const v of vals) str += (v<10?'0':'')+v;
+  } else {
+    const C=" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    for (const v of vals) str += v<96 ? C[v] : '';
+  }
+  return str;
+}
+
+function scan() {
+  if (found) return;
+  if (video.readyState < 2 || !video.videoWidth) { timer=setTimeout(scan,300); return; }
+  const vw=video.videoWidth, vh=video.videoHeight;
+  const sh=Math.round(vh*0.28), sy=Math.round(vh*0.36);
+  canvas.width=vw; canvas.height=sh;
+  ctx.drawImage(video, 0,sy,vw,sh, 0,0,vw,sh);
+  const data = ctx.getImageData(0,0,vw,sh).data;
+  const step = Math.max(1, Math.round(sh/15));
+  const candidates = [];
+  for (let row=0; row<sh; row+=step) {
+    const r = scanRow(data,vw,row);
+    if (r) candidates.push(r.replace(/\D/g,''));
+  }
+  // 最も多い結果を採用
+  if (candidates.length>0) {
+    const freq={};
+    for (const c of candidates) freq[c]=(freq[c]||0)+1;
+    const best = Object.keys(freq).sort((a,b)=>freq[b]-freq[a])[0];
+    if (best && best.length>=10) { onFound(best.slice(0,15)); return; }
+  }
+  timer = setTimeout(scan, 350);
+}
+
+function onFound(digits) {
+  found=true; clearTimeout(timer);
+  document.getElementById('line').style.display='none';
+  msg.style.color='#4caf50';
+  msg.textContent='✓ 読み取り成功！';
+  document.getElementById('rnum').textContent=digits;
+  document.getElementById('einput').value=digits;
+  document.getElementById('result').style.display='block';
+  document.getElementById('bok').style.display='flex';
+  document.getElementById('bretry').style.display='flex';
+  updateBadge(digits.length);
+}
+
+document.getElementById('einput').addEventListener('input',function(){
+  this.value=this.value.replace(/\D/g,'').slice(0,15);
+  document.getElementById('rnum').textContent=this.value;
+  updateBadge(this.value.length);
+});
+
+function updateBadge(n){
+  const el=document.getElementById('badge');
+  el.textContent=n+' / 15桁'+(n===15?' ✓':'');
+  el.className=n===15?'ok':'ng';
+}
+
+function confirm_(){
+  const num=document.getElementById('einput').value.replace(/\D/g,'');
+  if(num.length!==15){msg.style.color='#f44336';msg.textContent='15桁を確認してください（現在'+num.length+'桁）';return;}
+  if(window.opener) window.opener.postMessage({type:'BARCODE_RESULT',barcode:num},'*');
+  closeAll();
+}
+
+function restart(){
+  found=false;
+  document.getElementById('result').style.display='none';
+  document.getElementById('bok').style.display='none';
+  document.getElementById('bretry').style.display='none';
+  document.getElementById('line').style.display='block';
+  msg.style.color='#00e5ff';
+  msg.textContent='バーコードを青枠に合わせてください';
+  timer=setTimeout(scan,300);
+}
+
+function closeAll(){
+  clearTimeout(timer);
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  window.close();
+}
+
+startCamera();
+</script>
+</body>
+</html>
