@@ -4,59 +4,66 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>バーコードスキャン</title>
+<!-- ライブラリを読み込み（これがiPhone/Androidの差を埋めます） -->
+<script src="https://unpkg.com/html5-qrcode"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,sans-serif;background:#111;color:#fff;height:100vh;display:flex;justify-content:center;align-items:center;}
 
-/* iPad/PC対策: 画面が大きすぎる場合は幅を制限して中央に寄せる */
+/* iPad/PC対策: 画面が大きすぎる場合は幅を制限 */
 #app-container {
-  width: 100%;
-  max-width: 500px; /* スマホサイズに固定 */
-  height: 100%;
-  max-height: 900px;
-  display: flex;
-  flex-direction: column;
-  background: #000;
-  position: relative;
-  box-shadow: 0 0 20px rgba(0,0,0,0.5);
+  width: 100%; max-width: 500px; height: 100%; max-height: 900px;
+  display: flex; flex-direction: column; background: #000; position: relative;
 }
 
-#header{padding:12px 16px 8px; flex-shrink:0; background:#111;}
+#header{padding:12px 16px 8px; flex-shrink:0; background:#111; z-index:10;}
 #header h1{font-size:15px;font-weight:700;}
 #header p{font-size:11px;color:#888;margin-top:2px;}
 
-#video-wrap{position:relative;flex:1;background:#000;overflow:hidden;}
-video{width:100%;height:100%;object-fit:cover;display:block;}
+/* スキャナー表示領域 */
+#reader { width: 100% !important; flex: 1; background: #000; position: relative; border:none !important; }
+#reader video { object-fit: cover !important; }
 
-#aim{position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);width:80%;border:2px solid #00e5ff;border-radius:6px;padding-top:25%;pointer-events:none;}
-#scanline{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#00e5ff,transparent);animation:sc 2s linear infinite;}
+/* 自作の青枠をライブラリの上に重ねる */
+#aim-overlay {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -60%);
+  width: 80%; padding-top: 25%; border: 2px solid #00e5ff; border-radius: 6px;
+  pointer-events: none; z-index: 5;
+}
+#scanline {
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg,transparent,#00e5ff,transparent);
+  animation: sc 2s linear infinite;
+}
 @keyframes sc{0%{top:0%}100%{top:100%}}
 
-#msg{position:absolute;bottom:0;left:0;right:0;padding:12px;text-align:center;font-size:13px;font-weight:600;background:rgba(0,0,0,0.7);}
+#msg{position:absolute; bottom:0; left:0; right:0; padding:12px; text-align:center; font-size:13px; font-weight:600; background:rgba(0,0,0,0.7); z-index:10;}
 
-#footer{background:#181818;padding:12px 16px 24px;flex-shrink:0;}
-#result{display:none;margin-bottom:10px;}
-#rnum{font-size:24px;font-weight:700;letter-spacing:3px;font-family:monospace;text-align:center;padding:10px;background:#252525;border-radius:8px;margin-bottom:8px;color:#00e5ff;}
-#einput{width:100%;font-size:18px;font-family:monospace;font-weight:700;letter-spacing:2px;padding:10px;border-radius:8px;border:1.5px solid #444;background:#252525;color:#fff;text-align:center;}
+#footer{background:#181818; padding:12px 16px 24px; flex-shrink:0; z-index:10;}
+#result{display:none; margin-bottom:10px;}
+#rnum{font-size:24px; font-weight:700; letter-spacing:3px; font-family:monospace; text-align:center; padding:10px; background:#252525; border-radius:8px; margin-bottom:8px; color:#00e5ff;}
+#einput{width:100%; font-size:18px; font-family:monospace; font-weight:700; letter-spacing:2px; padding:10px; border-radius:8px; border:1.5px solid #444; background:#252525; color:#fff; text-align:center;}
 
-.btns{display:flex;gap:10px;margin-top:10px;}
-.btn{flex:1;padding:14px;border-radius:10px;font-size:14px;font-weight:700;border:none;cursor:pointer;}
-.b-ok{background:#185FA5;color:#fff;}
-.b-retry{background:#333;color:#ccc;}
-.b-close{background:#1a1a1a;color:#777;}
+.btns{display:flex; gap:10px; margin-top:10px;}
+.btn{flex:1; padding:14px; border-radius:10px; font-size:14px; font-weight:700; border:none; cursor:pointer;}
+.b-ok{background:#185FA5; color:#fff;}
+.b-retry{background:#333; color:#ccc;}
+.b-close{background:#1a1a1a; color:#777;}
 </style>
 </head>
 <body>
 
 <div id="app-container">
   <div id="header">
-    <h1>📷 バーコードスキャン3</h1>
+    <h1>📷 バーコードスキャン4</h1>
     <p>バーコードを枠に合わせてください</p>
   </div>
 
-  <div id="video-wrap">
-    <video id="video" autoplay playsinline muted></video>
-    <div id="aim"><div id="scanline"></div></div>
+  <div style="position:relative; flex:1; display:flex; flex-direction:column;">
+    <!-- ライブラリがビデオを表示する場所 -->
+    <div id="reader"></div>
+    <!-- 重ねるガイド枠 -->
+    <div id="aim-overlay"><div id="scanline"></div></div>
     <div id="msg">カメラを起動中...</div>
   </div>
 
@@ -67,81 +74,57 @@ video{width:100%;height:100%;object-fit:cover;display:block;}
     </div>
     <div class="btns">
       <button class="btn b-ok" id="bok" onclick="doConfirm()" style="display:none;">✅ 確定</button>
-      <button class="btn b-retry" id="bretry" onclick="doRestart()" style="display:none;">🔄 再読み込み</button>
+      <button class="btn b-retry" id="bretry" onclick="doRestart()" style="display:none;">🔄 再試行</button>
       <button class="btn b-close" onclick="doClose()">閉じる</button>
     </div>
   </div>
 </div>
 
 <script>
-const video = document.getElementById('video');
+let html5QrCode = null;
 const msg = document.getElementById('msg');
-let stream = null;
-let detector = null;
-let isScanning = false;
 
-// --- 初期化: ブラウザ標準のバーコード検出器が使えるか確認 ---
-async function initDetector() {
-  if (!('BarcodeDetector' in window)) {
-    msg.innerHTML = '<span style="color:#f44336">非対応ブラウザです<br>最新のSafari(iOS17+)またはChromeを使用してください</span>';
-    return false;
-  }
-  // CODE-128とITFに対応
-  detector = new BarcodeDetector({ formats: ['code_128', 'itf'] });
-  return true;
-}
+async function startScanner() {
+  // ライブラリの初期化
+  html5QrCode = new Html5Qrcode("reader");
 
-async function startCamera() {
-  const ready = await initDetector();
-  if (!ready) return;
+  const config = {
+    fps: 10,
+    qrbox: { width: 300, height: 150 }, // スキャン対象エリア
+    aspectRatio: 1.0,
+    // 対応フォーマットをCODE-128とITFに限定して高速化
+    formatsToSupport: [ 
+      Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.ITF
+    ]
+  };
 
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { 
-        facingMode: 'environment',
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
+    await html5QrCode.start(
+      { facingMode: "environment" },
+      config,
+      (decodedText) => {
+        // 成功時の処理
+        const cleanCode = decodedText.replace(/\D/g, '').slice(0, 15);
+        if (cleanCode.length >= 10) {
+          onSuccess(cleanCode);
+        }
+      },
+      (errorMessage) => {
+        // スキャン中は常にエラーが出るので無視
       }
-    });
-    video.srcObject = stream;
-    video.onplaying = () => {
-      msg.textContent = "枠内にバーコードを近づけてください";
-      isScanning = true;
-      render();
-    };
+    );
+    msg.textContent = "バーコードを枠に合わせてください";
   } catch (err) {
-    msg.textContent = "カメラ起動エラー: " + err.name;
+    msg.textContent = "カメラ起動エラー: " + err;
   }
 }
 
-// --- 解析ループ (OSネイティブの解析機能を使用) ---
-async function render() {
-  if (!isScanning) return;
-
-  try {
-    // 映像から直接バーコードを検出（これが最強に速くて正確）
-    const barcodes = await detector.detect(video);
-    
-    if (barcodes.length > 0) {
-      const code = barcodes[0].rawValue;
-      // 数字のみ抽出して15桁までに制限
-      const cleanCode = code.replace(/\D/g, '').slice(0, 15);
-      
-      if (cleanCode.length >= 10) {
-        onFound(cleanCode);
-        return; // ループ終了
-      }
-    }
-  } catch (e) {
-    console.error("Detection error:", e);
-  }
-
-  requestAnimationFrame(render);
-}
-
-function onFound(digits) {
-  isScanning = false;
-  document.getElementById('scanline').style.display = 'none';
+function onSuccess(digits) {
+  // スキャン停止
+  html5QrCode.stop();
+  
+  document.getElementById('aim-overlay').style.display = 'none';
   msg.style.color = '#4caf50';
   msg.textContent = "✓ 読み取り成功";
   
@@ -150,20 +133,17 @@ function onFound(digits) {
   document.getElementById('result').style.display = 'block';
   document.getElementById('bok').style.display = 'block';
   document.getElementById('bretry').style.display = 'block';
-  
-  // バイブレーション（対応端末のみ）
+
   if (navigator.vibrate) navigator.vibrate(200);
 }
 
 function doRestart() {
-  isScanning = true;
   document.getElementById('result').style.display = 'none';
   document.getElementById('bok').style.display = 'none';
   document.getElementById('bretry').style.display = 'none';
-  document.getElementById('scanline').style.display = 'block';
+  document.getElementById('aim-overlay').style.display = 'block';
   msg.style.color = '#fff';
-  msg.textContent = "枠内にバーコードを近づけてください";
-  render();
+  startScanner();
 }
 
 function doConfirm() {
@@ -173,11 +153,15 @@ function doConfirm() {
 }
 
 function doClose() {
-  if (stream) stream.getTracks().forEach(t => t.stop());
-  window.close();
+  if (html5QrCode && html5QrCode.isScanning) {
+    html5QrCode.stop().then(() => window.close());
+  } else {
+    window.close();
+  }
 }
 
-window.onload = startCamera;
+// 起動
+window.onload = startScanner;
 </script>
 </body>
 </html>
