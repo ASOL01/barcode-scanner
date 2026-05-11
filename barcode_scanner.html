@@ -9,7 +9,6 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, sans-serif; background: #000; color: #fff; height: 100vh; display: flex; justify-content: center; overflow: hidden; }
 
-  /* 画面全体のコンテナ */
   #app-container {
     width: 100%; max-width: 600px; height: 100%;
     display: flex; flex-direction: column; background: #111;
@@ -18,7 +17,6 @@
   #header { padding: 15px; background: #1a1a1a; text-align: center; border-bottom: 1px solid #333; z-index: 20; }
   #header h1 { font-size: 16px; font-weight: 700; }
 
-  /* --- 📷 カメラ領域 --- */
   #camera-section {
     position: relative; width: 100%; height: 50vh; min-height: 300px;
     background: #000; overflow: hidden;
@@ -28,27 +26,23 @@
   #reader { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   #reader video { width: 100% !important; max-height: 100% !important; object-fit: cover; }
   
-  /* ライブラリが勝手に出す白枠や暗転を完全に消去 */
   #qr-shaded-region { display: none !important; }
 
-  /* 読み取り成功時の静止画 */
   #snapshot {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     object-fit: cover; display: none; z-index: 5;
   }
 
-  /* 🌟 ワイドレーザー仕様の青枠（大きいバーコードもすっぽり入るように横幅を拡大） */
   #aim-frame {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 85%;           /* 画面の85%まで広げる */
-    max-width: 450px;     /* 上限を 280px → 450px に大幅拡大 */
-    height: 80px;         /* 高さは少しだけ余裕を持たせつつ細さをキープ */
+    width: 85%;
+    max-width: 450px;
+    height: 80px;
     border: 3px solid #00e5ff; border-radius: 8px;
     pointer-events: none; z-index: 10;
     box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(0, 229, 255, 0.3);
     transition: all 0.3s;
   }
-  /* 成功時の緑枠 */
   #aim-frame.success { 
     border-color: #4caf50; background: rgba(76, 175, 80, 0.2); 
     box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.7), inset 0 0 15px rgba(76, 175, 80, 0.5);
@@ -61,7 +55,6 @@
   #aim-frame.success #scanline { display: none; }
   @keyframes sc { 0% { top: 0%; } 100% { top: 100%; } }
 
-  /* --- 📝 操作・結果領域 --- */
   #action-section {
     flex: 1; padding: 20px; background: #111;
     display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
@@ -87,13 +80,19 @@
   #close-btn-wrap { margin-top: auto; padding-top: 20px; width: 100%; }
   .b-close { width: 100%; padding: 14px; border-radius: 10px; background: #1a1a1a; color: #888; border: 1px solid #333; font-weight: bold; cursor: pointer; }
 
+  /* コールバックなし警告 */
+  #no-callback-warn {
+    display: none; width: 100%; padding: 10px 14px; border-radius: 8px;
+    background: #2a2000; border: 1px solid #F0A500; color: #F0A500;
+    font-size: 13px; text-align: center; margin-bottom: 16px;
+  }
 </style>
 </head>
 <body>
 
 <div id="app-container">
   <div id="header">
-    <h1>📷 バーコードスキャン15</h1>
+    <h1>📷 バーコードスキャン16</h1>
   </div>
 
   <div id="camera-section">
@@ -109,6 +108,7 @@
     
     <div id="result-ui">
       <input type="tel" id="einput" maxlength="15" inputmode="numeric">
+      <div id="no-callback-warn">⚠ 戻り先が設定されていません。IMEIをメモして手動入力してください。</div>
       <div class="btns">
         <button class="btn b-ok" onclick="doConfirm()">✅ 確定</button>
         <button class="btn b-retry" onclick="doRetry()">🔄 再スキャン</button>
@@ -125,6 +125,10 @@
 let scanner = null;
 let isScanning = true;
 
+// ── URLパラメータからコールバックURLを取得 ──
+// 呼び出し例: barcode_scanner.html?callback=https://script.google.com/...
+const CALLBACK_URL = new URLSearchParams(location.search).get('callback') || '';
+
 async function startScanner() {
   if (scanner) {
     try { await scanner.clear(); } catch(e) {}
@@ -133,10 +137,9 @@ async function startScanner() {
 
   const config = {
     fps: 20, 
-    // 🌟 解析エリアもCSSに合わせて「横広・縦狭」に設定（処理の軽さと読み取り幅の両立）
     qrbox: (viewfinderWidth, viewfinderHeight) => {
-      const boxWidth = Math.min(viewfinderWidth * 0.85, 450); // 上限を450pxに拡大
-      return { width: Math.floor(boxWidth), height: 80 };     // 高さは80pxで処理を軽くキープ
+      const boxWidth = Math.min(viewfinderWidth * 0.85, 450);
+      return { width: Math.floor(boxWidth), height: 80 };
     },
     experimentalFeatures: { useBarCodeDetectorIfSupported: true },
     formatsToSupport: [ Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.ITF ]
@@ -172,7 +175,6 @@ function onSuccess(digits) {
       canvas.width = videoEl.videoWidth;
       canvas.height = videoEl.videoHeight;
       canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-      
       const snapshotEl = document.getElementById('snapshot');
       snapshotEl.src = canvas.toDataURL('image/jpeg');
       snapshotEl.style.display = 'block';
@@ -186,6 +188,11 @@ function onSuccess(digits) {
   document.getElementById('result-ui').style.display = 'block';
   document.getElementById('einput').value = digits;
 
+  // コールバックURLがない場合は警告を表示
+  if (!CALLBACK_URL) {
+    document.getElementById('no-callback-warn').style.display = 'block';
+  }
+
   if (navigator.vibrate) navigator.vibrate(100);
 }
 
@@ -194,7 +201,9 @@ function doRetry() {
   document.getElementById('aim-frame').classList.remove('success');
   document.getElementById('result-ui').style.display = 'none';
   document.getElementById('status-msg').style.display = 'block';
+  document.getElementById('status-msg').style.color = '#00e5ff';
   document.getElementById('einput').value = '';
+  document.getElementById('no-callback-warn').style.display = 'none';
 
   if (scanner) scanner.resume();
   setTimeout(() => { isScanning = true; }, 300);
@@ -209,15 +218,41 @@ function doConfirm() {
     return;
   }
 
-  if (window.opener) window.opener.postMessage({ type: 'BARCODE_RESULT', barcode: cleanVal }, '*');
-  doClose();
+  if (CALLBACK_URL) {
+    // ── URLパラメータでフォームページに戻る ──
+    // コールバックURL に ?imei=XXXXXXXXXXXXXXX を付けてリダイレクト
+    const sep = CALLBACK_URL.includes('?') ? '&' : '?';
+    const returnUrl = CALLBACK_URL + sep + 'imei=' + encodeURIComponent(cleanVal);
+
+    // カメラを停止してから遷移
+    if (scanner) {
+      scanner.stop()
+        .catch(() => {})
+        .finally(() => { location.href = returnUrl; });
+    } else {
+      location.href = returnUrl;
+    }
+  } else {
+    // コールバックURLがない場合（単体テスト等）はアラートで表示
+    alert('IMEI: ' + cleanVal + '\n\n（戻り先URLが未設定のため画面遷移できません）');
+  }
 }
 
 function doClose() {
-  if (scanner && scanner.isScanning) {
-    scanner.stop().then(() => window.close()).catch(() => window.close());
+  if (CALLBACK_URL) {
+    // 戻り先があれば何も渡さずフォームに戻る
+    if (scanner) {
+      scanner.stop().catch(() => {}).finally(() => { location.href = CALLBACK_URL; });
+    } else {
+      location.href = CALLBACK_URL;
+    }
   } else {
-    window.close();
+    // 戻り先がなければ閉じる
+    if (scanner && scanner.isScanning) {
+      scanner.stop().then(() => window.close()).catch(() => window.close());
+    } else {
+      window.close();
+    }
   }
 }
 
