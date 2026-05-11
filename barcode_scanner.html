@@ -37,21 +37,21 @@
     object-fit: cover; display: none; z-index: 5;
   }
 
-  /* 🌟 自作の青枠（iPadでもスマホと同じ「320px」に固定して接近しすぎを防止） */
+  /* 🌟 爆速レーザー仕様の青枠（高さを60pxに削って処理を劇的に軽くする） */
   #aim-frame {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 320px; max-width: 90%; /* 小さいスマホ用の保険 */
-    height: 120px;
-    border: 3px solid #00e5ff; border-radius: 12px;
+    width: 280px; max-width: 90%;
+    height: 60px; /* スリット状に細くする */
+    border: 3px solid #00e5ff; border-radius: 8px;
     pointer-events: none; z-index: 10;
     /* 枠の外側を暗くする美しいCSSトリック */
-    box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5), inset 0 0 15px rgba(0, 229, 255, 0.3);
+    box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(0, 229, 255, 0.3);
     transition: all 0.3s;
   }
   /* 成功時の緑枠 */
   #aim-frame.success { 
     border-color: #4caf50; background: rgba(76, 175, 80, 0.2); 
-    box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(76, 175, 80, 0.5);
+    box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.7), inset 0 0 15px rgba(76, 175, 80, 0.5);
   }
   
   #scanline {
@@ -95,7 +95,7 @@
 
 <div id="app-container">
   <div id="header">
-    <h1>📷 バーコードスキャン13</h1>
+    <h1>📷 バーコードスキャン</h1>
   </div>
 
   <!-- カメラと青枠の領域 -->
@@ -136,13 +136,11 @@ async function startScanner() {
   scanner = new Html5Qrcode("reader");
 
   const config = {
-    fps: 15,
-    // 🌟iPad横画面・ピンボケ対策
-    // 解析エリアのサイズをCSSの青枠と「ピクセル単位」で完全に一致させる！
+    fps: 20, // 処理が軽くなった分、1秒間のスキャン回数を増やして爆速化
+    // 🌟 解析エリアのサイズをCSSの青枠と「ピクセル単位」で完全に一致させる
     qrbox: (viewfinderWidth, viewfinderHeight) => {
-      // 画面の90% か 320px の小さい方を採用（CSSと完全同期）
-      const boxWidth = Math.min(viewfinderWidth * 0.9, 320);
-      return { width: Math.floor(boxWidth), height: 120 };
+      const boxWidth = Math.min(viewfinderWidth * 0.9, 280);
+      return { width: Math.floor(boxWidth), height: 60 }; // 高さを60pxに削り、iPadでの負荷を激減
     },
     experimentalFeatures: { useBarCodeDetectorIfSupported: true },
     formatsToSupport: [ Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.ITF ]
@@ -164,7 +162,7 @@ async function startScanner() {
       },
       () => {} // スキャン中のエラーログは無視
     );
-    document.getElementById('status-msg').textContent = "15桁のバーコードを枠に合わせてください";
+    document.getElementById('status-msg').textContent = "15桁のバーコードを枠に水平に合わせてください";
   } catch (err) {
     document.getElementById('status-msg').textContent = "カメラ起動エラー: " + err;
   }
